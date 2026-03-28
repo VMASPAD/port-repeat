@@ -1,0 +1,8 @@
+/target
+Cargo.lock
+*.pem
+*.key
+*.crt
+plan.md
+image.png
+.claude

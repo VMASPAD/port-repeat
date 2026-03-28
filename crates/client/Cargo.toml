@@ -1,0 +1,22 @@
+[package]
+name    = "rustunnel-client"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "rustunnel-client"
+path = "src/main.rs"
+
+[dependencies]
+common     = { workspace = true }
+tokio      = { workspace = true }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+bytes      = { workspace = true }
+dashmap    = { workspace = true }
+clap       = { workspace = true }
+toml       = { workspace = true }
+tracing    = { workspace = true }
+tracing-subscriber = { workspace = true }
+thiserror  = { workspace = true }
+anyhow     = { workspace = true }
