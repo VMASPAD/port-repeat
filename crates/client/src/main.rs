@@ -19,7 +19,7 @@ use common::{
 use config::ClientConfig;
 
 #[derive(Parser)]
-#[command(name = "rustunnel-client", about = "RusTunnel local client")]
+#[command(name = "port-repeat-client", about = "port-repeat local client")]
 struct Cli {
     #[arg(short, long, default_value = "config/client.toml")]
     config: PathBuf,
@@ -30,7 +30,7 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("rustunnel_client=debug".parse()?) 
+                .add_directive("port-repeat_client=debug".parse()?) 
                 .add_directive("info".parse()?),
         )
         .init();

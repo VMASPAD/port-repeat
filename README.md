@@ -1,11 +1,11 @@
-# RusTunnel
+# port-repeat
 
 A self-hosted TCP/HTTP tunnel written in Rust — similar to ngrok but running entirely on your own VPS. It exposes local services to the internet through a persistent WebSocket control connection.
 
 ## How it works
 
 ```
-[local service] <──> [rustunnel-client] <──WS──> [rustunnel-server on VPS] <──> [internet]
+[local service] <──> [port-repeat-client] <──WS──> [port-repeat-server on VPS] <──> [internet]
 ```
 
 - The **client** runs on your local machine and connects to the server over WebSocket.
@@ -24,7 +24,7 @@ port-repeat/
 ├── config/
 │   ├── server.toml
 │   └── client.toml
-└── Dockerfile      # builds rustunnel-server
+└── Dockerfile      # builds port-repeat-server
 ```
 
 ## Configuration
@@ -67,10 +67,10 @@ protocol   = "http"   # server assigns a UUID URL automatically
 cargo build --release
 
 # Run the server
-./target/release/rustunnel-server --config config/server.toml
+./target/release/port-repeat-server --config config/server.toml
 
 # Run the client
-./target/release/rustunnel-client --config config/client.toml
+./target/release/port-repeat-client --config config/client.toml
 ```
 
 Requires Rust 1.87+ and OpenSSL dev headers (`libssl-dev` on Debian/Ubuntu).
@@ -127,10 +127,10 @@ ufw allow 25565/tcp
 
 6. Mount a persistent volume or use an **Environment variable** / config file override for `config/server.toml`. The easiest approach in Coolify is to use a **Custom Config File** mount:
 
-   - Host path: `/data/rustunnel/server.toml`
+   - Host path: `/data/port-repeat/server.toml`
    - Container path: `/app/config/server.toml`
 
-   Then place your `server.toml` at `/data/rustunnel/server.toml` on the VPS.
+   Then place your `server.toml` at `/data/port-repeat/server.toml` on the VPS.
 
 ---
 
@@ -146,18 +146,18 @@ traefik.enable=true
 traefik.http.middlewares.ws-headers.headers.customrequestheaders.X-Forwarded-Proto=https
 
 # Service for the HTTP proxy (port 9000)
-traefik.http.routers.rustunnel-http.rule=Host(`tunnel.yourdomain.com`)
-traefik.http.routers.rustunnel-http.entrypoints=https
-traefik.http.routers.rustunnel-http.tls=true
-traefik.http.routers.rustunnel-http.tls.certresolver=letsencrypt
-traefik.http.services.rustunnel-http.loadbalancer.server.port=9000
+traefik.http.routers.port-repeat-http.rule=Host(`tunnel.yourdomain.com`)
+traefik.http.routers.port-repeat-http.entrypoints=https
+traefik.http.routers.port-repeat-http.tls=true
+traefik.http.routers.port-repeat-http.tls.certresolver=letsencrypt
+traefik.http.services.port-repeat-http.loadbalancer.server.port=9000
 
 # WebSocket control endpoint (/tunnel path)
-traefik.http.routers.rustunnel-ws.rule=Host(`tunnel.yourdomain.com`) && PathPrefix(`/tunnel`)
-traefik.http.routers.rustunnel-ws.entrypoints=https
-traefik.http.routers.rustunnel-ws.tls=true
-traefik.http.routers.rustunnel-ws.tls.certresolver=letsencrypt
-traefik.http.services.rustunnel-ws.loadbalancer.server.port=7000
+traefik.http.routers.port-repeat-ws.rule=Host(`tunnel.yourdomain.com`) && PathPrefix(`/tunnel`)
+traefik.http.routers.port-repeat-ws.entrypoints=https
+traefik.http.routers.port-repeat-ws.tls=true
+traefik.http.routers.port-repeat-ws.tls.certresolver=letsencrypt
+traefik.http.services.port-repeat-ws.loadbalancer.server.port=7000
 ```
 
 Replace `tunnel.yourdomain.com` with your actual domain pointed to the VPS.
@@ -185,7 +185,7 @@ ws_url = "wss://tunnel.yourdomain.com/tunnel"
 Download or build the client binary and run:
 
 ```bash
-./rustunnel-client --config config/client.toml
+./port-repeat-client --config config/client.toml
 ```
 
 The client will connect, authenticate, and print the assigned endpoints:

@@ -1,4 +1,4 @@
-# RusTunnel — server configuration
+# port-repeat — server configuration
 control_port             = 7000
 auth_token               = "change-me-secret"
 max_streams              = 1024

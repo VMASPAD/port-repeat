@@ -22,7 +22,7 @@ use config::ServerConfig;
 use http_registry::HttpRegistry;
 
 #[derive(Parser)]
-#[command(name = "rustunnel-server", about = "RusTunnel VPS server")]
+#[command(name = "port-repeat-server", about = "port-repeat VPS server")]
 struct Cli {
     #[arg(short, long, default_value = "config/server.toml")]
     config: PathBuf,
@@ -33,7 +33,7 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("rustunnel_server=debug".parse()?)
+                .add_directive("port-repeat_server=debug".parse()?)
                 .add_directive("info".parse()?),
         )
         .init();

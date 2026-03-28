@@ -1,4 +1,4 @@
-# RusTunnel — client configuration
+# port-repeat — client configuration
 ws_url     = "wss://rp.hermesbackend.xyz/tunnel"
 auth_token = "change-me-secret"
 

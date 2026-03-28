@@ -1,10 +1,10 @@
 [package]
-name    = "rustunnel-server"
+name    = "port-repeat-server"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "rustunnel-server"
+name = "port-repeat-server"
 path = "src/main.rs"
 
 [dependencies]
