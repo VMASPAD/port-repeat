@@ -24,15 +24,23 @@ pub struct ServerState {
     #[allow(dead_code)]
     pub tunnels: Vec<TunnelSpec>,
 
+    /// HTTP tunnel assignments: (tunnel_id, uuid) for each Http protocol tunnel.
+    pub http_tunnel_ids: Vec<(u8, String)>,
+
     next_stream_id: AtomicU32,
 }
 
 impl ServerState {
-    pub fn new(control_tx: mpsc::Sender<ControlMsg>, tunnels: Vec<TunnelSpec>) -> Arc<Self> {
+    pub fn new(
+        control_tx: mpsc::Sender<ControlMsg>,
+        tunnels: Vec<TunnelSpec>,
+        http_tunnel_ids: Vec<(u8, String)>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             control_tx,
             streams: DashMap::new(),
             tunnels,
+            http_tunnel_ids,
             next_stream_id: AtomicU32::new(1),
         })
     }

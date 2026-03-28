@@ -30,7 +30,7 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("rustunnel_client=debug".parse()?)
+                .add_directive("rustunnel_client=debug".parse()?) 
                 .add_directive("info".parse()?),
         )
         .init();
@@ -78,14 +78,14 @@ async fn connect_and_run(cfg: &ClientConfig) -> anyhow::Result<()> {
         .await?;
 
     // ── wait for HelloOk ─────────────────────────────────────────────────────
-    let assigned_ports = loop {
+    let assignments = loop {
         match ws_stream.next().await {
             Some(Ok(Message::Binary(data))) => match decode_msg(&data)? {
-                ControlMsg::HelloOk { assigned_ports } => break assigned_ports,
+                ControlMsg::HelloOk { assignments } => break assignments,
                 other => return Err(anyhow::anyhow!("expected HelloOk, got {other:?}")),
             },
             Some(Ok(Message::Text(text))) => match serde_json::from_str::<ControlMsg>(&text)? {
-                ControlMsg::HelloOk { assigned_ports } => break assigned_ports,
+                ControlMsg::HelloOk { assignments } => break assignments,
                 other => return Err(anyhow::anyhow!("expected HelloOk, got {other:?}")),
             },
             Some(Ok(Message::Close(_))) | None => {
@@ -95,7 +95,24 @@ async fn connect_and_run(cfg: &ClientConfig) -> anyhow::Result<()> {
             Some(Ok(_)) => continue,
         }
     };
-    info!("authenticated. assigned ports: {assigned_ports:?}");
+
+    // Log tunnel assignments
+    for a in &assignments {
+        let name = tunnels
+            .get(a.tunnel_id as usize)
+            .map(|t| t.name.as_str())
+            .unwrap_or("?");
+        if let Some(url) = &a.http_url {
+            info!("");
+            info!("  ┌─ HTTP TUNNEL READY ─────────────────────────────┐");
+            info!("  │  name : {name}");
+            info!("  │  url  : {url}");
+            info!("  └────────────────────────────────────────────────────┘");
+            info!("");
+        } else if let Some(port) = a.remote_port {
+            info!("tunnel '{name}' → port {port}");
+        }
+    }
 
     // ── shared state: active streams ─────────────────────────────────────────
     let streams: std::sync::Arc<DashMap<u32, mpsc::Sender<Bytes>>> =

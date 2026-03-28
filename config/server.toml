@@ -1,4 +1,9 @@
 # RusTunnel — server configuration
-control_port = 7000
-auth_token   = "change-me-secret"
-max_streams  = 1024
+control_port             = 7000
+auth_token               = "change-me-secret"
+max_streams              = 1024
+
+# HTTP proxy for UUID-based tunnel endpoints
+http_proxy_port          = 9000
+http_base_url            = "http://rp.hermesbackend.xyz:9000"
+http_idle_timeout_secs   = 300

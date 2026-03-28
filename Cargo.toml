@@ -21,6 +21,9 @@ anyhow             = "1"
 common             = { path = "crates/common" }
 tokio-tungstenite  = { version = "0.21", features = ["native-tls"] }
 futures-util       = { version = "0.3", default-features = false, features = ["sink", "std"] }
+uuid               = { version = "1", features = ["v4"] }
+axum               = "0.7"
+httparse           = "1"
 
 [workspace.lints.clippy]
 perf        = "warn"

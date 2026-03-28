@@ -15,7 +15,7 @@ pub enum ControlMsg {
 
     // ── server → client ──────────────────────────────────────────────────
     /// Sent after a successful Hello.
-    HelloOk { assigned_ports: Vec<u16> },
+    HelloOk { assignments: Vec<TunnelAssignment> },
     /// Server tells the client a new public connection arrived on `tunnel_id`.
     NewConn { stream_id: u32, tunnel_id: u8 },
 
@@ -32,12 +32,25 @@ pub enum ControlMsg {
     Pong,
 }
 
+/// Per-tunnel assignment returned in HelloOk.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TunnelAssignment {
+    pub tunnel_id: u8,
+    /// Set for TCP/UDP tunnels: the public port on the VPS.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remote_port: Option<u16>,
+    /// Set for HTTP tunnels: the full URL endpoint.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub http_url: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TunnelSpec {
     /// Human-readable label (e.g. "minecraft").
     pub name: String,
-    /// Port opened on the VPS for public traffic.
-    pub remote_port: u16,
+    /// Port opened on the VPS for public traffic. None for Http tunnels.
+    #[serde(default)]
+    pub remote_port: Option<u16>,
     /// Port on the local machine to forward to.
     pub local_port: u16,
     pub protocol: Protocol,
@@ -48,6 +61,7 @@ pub struct TunnelSpec {
 pub enum Protocol {
     Tcp,
     Udp,
+    Http,
 }
 
 // ── serde helper: encode Bytes as base64 ────────────────────────────────────

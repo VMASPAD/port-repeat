@@ -28,7 +28,9 @@ impl ClientConfig {
 #[derive(Debug, Deserialize)]
 pub struct TunnelEntry {
     pub name: String,
-    pub remote_port: u16,
+    /// Required for tcp/udp tunnels. Omit for http tunnels (server assigns UUID endpoint).
+    #[serde(default)]
+    pub remote_port: Option<u16>,
     pub local_port: u16,
     #[serde(default = "default_protocol")]
     pub protocol: Protocol,

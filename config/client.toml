@@ -9,7 +9,8 @@ local_port  = 25565
 protocol    = "tcp"
 
 [[tunnel]]
-name        = "api"
-remote_port = 8080
-local_port  = 3000
-protocol    = "tcp"
+# HTTP tunnel: server auto-assigns a temporary UUID endpoint URL.
+# No remote_port needed.
+name       = "api"
+local_port = 3000
+protocol   = "http"

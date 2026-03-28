@@ -15,9 +15,9 @@ use tracing::warn;
 
 use common::{
     codec::{decode_msg, encode_msg},
-    proto::ControlMsg,
+    proto::ControlMsg, 
 };
-
+ 
 use crate::state::ServerState;
 
 type WsSink = SplitSink<WebSocketStream<TcpStream>, Message>;
@@ -29,9 +29,10 @@ pub fn make_session(
     ws_sink: WsSink,
     ws_stream: WsStream,
     tunnels: Vec<common::proto::TunnelSpec>,
+    http_tunnel_ids: Vec<(u8, String)>,
 ) -> (Arc<ServerState>, impl std::future::Future<Output = anyhow::Result<()>>) {
     let (out_tx, mut out_rx) = mpsc::channel::<ControlMsg>(256);
-    let state = ServerState::new(out_tx, tunnels);
+    let state = ServerState::new(out_tx, tunnels, http_tunnel_ids);
     let state_clone = Arc::clone(&state);
 
     let mut sink = ws_sink;
