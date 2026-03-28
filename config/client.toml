@@ -1,7 +1,6 @@
 # RusTunnel — client configuration
-server_host  = "your-vps.example.com"
-control_port = 7000
-auth_token   = "change-me-secret"
+ws_url     = "wss://rp.hermesbackend.xyz/tunnel"
+auth_token = "change-me-secret"
 
 [[tunnel]]
 name        = "minecraft"

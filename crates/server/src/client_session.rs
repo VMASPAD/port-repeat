@@ -1,61 +1,81 @@
-/// Handles one connected client after the Hello handshake.
+/// Manages the control WebSocket session after the Hello handshake.
 ///
-/// Spawns:
-///   - a writer task that drains the outbound mpsc queue into the TCP writer
-///   - a reader loop that dispatches incoming Data/Close/Ping frames
+/// Spawns a writer task that drains the outbound mpsc queue into the WS sink.
+/// Returns a reader future that dispatches incoming Data/Close/Ping frames.
 use std::sync::Arc;
 
-use bytes::Bytes;
-use tokio::{
-    io::BufReader,
-    net::TcpStream,
-    sync::mpsc,
+use futures_util::{
+    stream::{SplitSink, SplitStream},
+    SinkExt, StreamExt,
 };
+use tokio::net::TcpStream;
+use tokio::sync::mpsc;
+use tokio_tungstenite::{tungstenite::Message, WebSocketStream};
 use tracing::warn;
 
 use common::{
-    codec::{read_msg, write_msg},
-    error::ProtoError,
+    codec::{decode_msg, encode_msg},
     proto::ControlMsg,
 };
 
 use crate::state::ServerState;
 
-/// Create a `ServerState` + spawn writer + return reader future.
-///
-/// Returns `(state, read_fut)`. Caller should `.await` the read_fut (or spawn it).
+type WsSink = SplitSink<WebSocketStream<TcpStream>, Message>;
+type WsStream = SplitStream<WebSocketStream<TcpStream>>;
+
+/// Create a `ServerState`, spawn the writer task, return (state, reader_future).
+/// Caller should `.await` the reader future (or spawn it).
 pub fn make_session(
-    stream: TcpStream,
+    ws_sink: WsSink,
+    ws_stream: WsStream,
     tunnels: Vec<common::proto::TunnelSpec>,
 ) -> (Arc<ServerState>, impl std::future::Future<Output = anyhow::Result<()>>) {
-    let (out_tx, mut out_rx) = mpsc::channel::<Bytes>(256);
+    let (out_tx, mut out_rx) = mpsc::channel::<ControlMsg>(256);
     let state = ServerState::new(out_tx, tunnels);
     let state_clone = Arc::clone(&state);
 
-    let (read_half, write_half) = stream.into_split();
-    let mut reader = BufReader::new(read_half);
-    let mut writer = tokio::io::BufWriter::new(write_half);
+    let mut sink = ws_sink;
 
-    // Spawn writer task.
+    // Writer task: serializes each ControlMsg and sends it as a WS Binary frame.
     tokio::spawn(async move {
-        use tokio::io::AsyncWriteExt;
-        while let Some(frame) = out_rx.recv().await {
-            if writer.write_all(&frame).await.is_err() {
-                break;
+        while let Some(msg) = out_rx.recv().await {
+            match encode_msg(&msg) {
+                Ok(encoded) => {
+                    if sink.send(Message::Binary(encoded)).await.is_err() {
+                        break;
+                    }
+                }
+                Err(e) => warn!("encode error: {e}"),
             }
-            let _ = writer.flush().await;
         }
     });
 
+    let mut stream = ws_stream;
     let fut = async move {
         loop {
-            match read_msg(&mut reader).await {
-                Ok(msg) => handle_msg(msg, &state_clone).await,
-                Err(ProtoError::ConnectionClosed) => break,
-                Err(e) => {
-                    warn!("proto error: {e}");
+            match stream.next().await {
+                Some(Ok(Message::Binary(data))) => match decode_msg(&data) {
+                    Ok(msg) => handle_msg(msg, &state_clone).await,
+                    Err(e) => {
+                        warn!("decode error: {e}");
+                        break;
+                    }
+                },
+                Some(Ok(Message::Text(text))) => {
+                    match serde_json::from_str::<ControlMsg>(&text) {
+                        Ok(msg) => handle_msg(msg, &state_clone).await,
+                        Err(e) => {
+                            warn!("decode error: {e}");
+                            break;
+                        }
+                    }
+                }
+                Some(Ok(Message::Close(_))) | None => break,
+                Some(Err(e)) => {
+                    warn!("ws error: {e}");
                     break;
                 }
+                Some(Ok(_)) => {} // skip Ping/Pong/Frame
             }
         }
         state_clone.streams.clear();
@@ -86,8 +106,5 @@ async fn handle_msg(msg: ControlMsg, state: &ServerState) {
 }
 
 pub async fn send_control(state: &ServerState, msg: ControlMsg) {
-    let mut buf = Vec::new();
-    if write_msg(&mut buf, &msg).await.is_ok() {
-        let _ = state.control_tx.send(Bytes::from(buf)).await;
-    }
+    let _ = state.control_tx.send(msg).await;
 }

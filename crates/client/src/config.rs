@@ -4,9 +4,8 @@ use common::proto::{Protocol, TunnelSpec};
 
 #[derive(Debug, Deserialize)]
 pub struct ClientConfig {
-    pub server_host: String,
-    #[serde(default = "default_control_port")]
-    pub control_port: u16,
+    /// Full WebSocket URL, e.g. "wss://rp.hermesbackend.xyz/tunnel"
+    pub ws_url: String,
     pub auth_token: String,
     #[serde(default)]
     pub tunnel: Vec<TunnelEntry>,
@@ -33,10 +32,6 @@ pub struct TunnelEntry {
     pub local_port: u16,
     #[serde(default = "default_protocol")]
     pub protocol: Protocol,
-}
-
-fn default_control_port() -> u16 {
-    7000
 }
 
 fn default_protocol() -> Protocol {

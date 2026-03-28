@@ -7,15 +7,13 @@ use anyhow::Context;
 use bytes::Bytes;
 use clap::Parser;
 use dashmap::DashMap;
-use tokio::{
-    io::BufReader,
-    net::TcpStream,
-    sync::mpsc,
-};
+use futures_util::{SinkExt, StreamExt};
+use tokio::sync::mpsc;
+use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{info, warn};
 
 use common::{
-    codec::{read_msg, write_msg},
+    codec::{decode_msg, encode_msg},
     proto::ControlMsg,
 };
 use config::ClientConfig;
@@ -46,10 +44,7 @@ async fn main() -> anyhow::Result<()> {
     let mut delay = Duration::from_secs(1);
 
     loop {
-        info!(
-            "connecting to {}:{}",
-            cfg.server_host, cfg.control_port
-        );
+        info!("connecting to {}", cfg.ws_url);
         match connect_and_run(&cfg).await {
             Ok(()) => {
                 info!("session ended cleanly");
@@ -67,60 +62,77 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn connect_and_run(cfg: &ClientConfig) -> anyhow::Result<()> {
-    let addr = format!("{}:{}", cfg.server_host, cfg.control_port);
-    let stream = TcpStream::connect(&addr)
+    let (ws, _) = connect_async(&cfg.ws_url)
         .await
-        .with_context(|| format!("connecting to {addr}"))?;
+        .with_context(|| format!("connecting to {}", cfg.ws_url))?;
 
     let tunnels = cfg.tunnel_specs();
-    let (reader_half, writer_half) = stream.into_split();
-    let mut reader = BufReader::new(reader_half);
-    let mut writer = tokio::io::BufWriter::new(writer_half);
+    let (mut ws_sink, mut ws_stream) = ws.split();
 
     // ── send Hello ───────────────────────────────────────────────────────────
-    write_msg(
-        &mut writer,
-        &ControlMsg::Hello {
+    ws_sink
+        .send(Message::Binary(encode_msg(&ControlMsg::Hello {
             auth_token: cfg.auth_token.clone(),
             tunnels: tunnels.clone(),
-        },
-    )
-    .await?;
+        })?))
+        .await?;
 
     // ── wait for HelloOk ─────────────────────────────────────────────────────
-    match read_msg(&mut reader).await? {
-        ControlMsg::HelloOk { assigned_ports } => {
-            info!("authenticated. assigned ports: {assigned_ports:?}");
+    let assigned_ports = loop {
+        match ws_stream.next().await {
+            Some(Ok(Message::Binary(data))) => match decode_msg(&data)? {
+                ControlMsg::HelloOk { assigned_ports } => break assigned_ports,
+                other => return Err(anyhow::anyhow!("expected HelloOk, got {other:?}")),
+            },
+            Some(Ok(Message::Text(text))) => match serde_json::from_str::<ControlMsg>(&text)? {
+                ControlMsg::HelloOk { assigned_ports } => break assigned_ports,
+                other => return Err(anyhow::anyhow!("expected HelloOk, got {other:?}")),
+            },
+            Some(Ok(Message::Close(_))) | None => {
+                return Err(anyhow::anyhow!("connection closed before HelloOk"));
+            }
+            Some(Err(e)) => return Err(e.into()),
+            Some(Ok(_)) => continue,
         }
-        other => {
-            return Err(anyhow::anyhow!("expected HelloOk, got {other:?}"));
-        }
-    }
+    };
+    info!("authenticated. assigned ports: {assigned_ports:?}");
 
     // ── shared state: active streams ─────────────────────────────────────────
-    // stream_id → sender of bytes destined for the local service
     let streams: std::sync::Arc<DashMap<u32, mpsc::Sender<Bytes>>> =
-        std::sync::Arc::new(DashMap::<u32, mpsc::Sender<Bytes>>::new());
+        std::sync::Arc::new(DashMap::new());
 
-    // Channel for frames the proxy tasks want to send to the server.
     let (to_server_tx, mut to_server_rx) = mpsc::channel::<ControlMsg>(256);
 
-    // ── writer task: drains to_server_rx into the TCP writer ─────────────────
+    // ── writer task: drains to_server_rx into the WS sink ────────────────────
     tokio::spawn(async move {
         while let Some(msg) = to_server_rx.recv().await {
-            if write_msg(&mut writer, &msg).await.is_err() {
-                break;
+            match encode_msg(&msg) {
+                Ok(encoded) => {
+                    if ws_sink.send(Message::Binary(encoded)).await.is_err() {
+                        break;
+                    }
+                }
+                Err(_) => break,
             }
         }
     });
 
     // ── reader loop ──────────────────────────────────────────────────────────
     loop {
-        match read_msg(&mut reader).await? {
-            ControlMsg::NewConn {
-                stream_id,
-                tunnel_id,
-            } => {
+        let msg = loop {
+            match ws_stream.next().await {
+                Some(Ok(Message::Binary(data))) => break decode_msg(&data)?,
+                Some(Ok(Message::Text(text))) => {
+                    break serde_json::from_str::<ControlMsg>(&text)?
+                }
+                Some(Ok(Message::Close(_))) | None => return Ok(()),
+                Some(Err(e)) => return Err(e.into()),
+                Some(Ok(_)) => continue,
+            }
+        };
+
+        match msg {
+            ControlMsg::NewConn { stream_id, tunnel_id } => {
                 let local_port = match tunnels.get(tunnel_id as usize) {
                     Some(t) => t.local_port,
                     None => {
@@ -133,8 +145,7 @@ async fn connect_and_run(cfg: &ClientConfig) -> anyhow::Result<()> {
                 streams.insert(stream_id, from_server_tx);
 
                 let to_srv = to_server_tx.clone();
-                let streams_clone: std::sync::Arc<DashMap<u32, mpsc::Sender<Bytes>>> =
-                    std::sync::Arc::clone(&streams);
+                let streams_clone = std::sync::Arc::clone(&streams);
                 tokio::spawn(async move {
                     tunnel::proxy_stream(stream_id, local_port, from_server_rx, to_srv).await;
                     streams_clone.remove(&stream_id);

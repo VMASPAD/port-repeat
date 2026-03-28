@@ -3,17 +3,17 @@ mod config;
 mod public_listener;
 mod state;
 
-use std::{fs, path::PathBuf};
+use std::{fs, path::PathBuf, sync::Arc};
 
 use anyhow::Context;
 use clap::Parser;
+use futures_util::{SinkExt, StreamExt};
 use tokio::net::TcpListener;
+use tokio_tungstenite::{accept_async, tungstenite::Message};
 use tracing::{error, info, warn};
 
-use common::{
-    codec::{read_msg, write_msg},
-    proto::ControlMsg,
-};
+use common::codec::{decode_msg, encode_msg};
+use common::proto::ControlMsg;
 
 use client_session::make_session;
 use config::ServerConfig;
@@ -45,53 +45,79 @@ async fn main() -> anyhow::Result<()> {
 
     loop {
         let (stream, peer) = listener.accept().await?;
-        info!("new control connection from {peer}");
 
         let auth_token = cfg.auth_token.clone();
         tokio::spawn(async move {
-            if let Err(e) = handle_control(stream, &auth_token).await {
-                error!("client {peer} error: {e}");
+            match accept_async(stream).await {
+                Ok(ws) => {
+                    info!("new WS connection from {peer}");
+                    if let Err(e) = handle_control(ws, &auth_token).await {
+                        error!("client {peer} error: {e}");
+                    }
+                }
+                Err(e) => {
+                    warn!("WS handshake failed from {peer}: {e}");
+                }
             }
         });
     }
 }
 
 async fn handle_control(
-    mut stream: tokio::net::TcpStream,
+    ws: tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
     auth_token: &str,
 ) -> anyhow::Result<()> {
+    let (mut ws_sink, mut ws_stream) = ws.split();
+
     // ── authentication handshake ────────────────────────────────────────────
-    let hello = read_msg(&mut stream).await?;
-    let tunnels = match hello {
-        ControlMsg::Hello {
-            auth_token: token,
-            tunnels,
-        } => {
-            if token != auth_token {
-                warn!("bad auth token");
-                let _ = write_msg(&mut stream, &ControlMsg::CloseStream { stream_id: 0 }).await;
-                return Err(anyhow::anyhow!("auth failed"));
+    let tunnels = loop {
+        match ws_stream.next().await {
+            Some(Ok(Message::Binary(data))) => {
+                match decode_msg(&data)? {
+                    ControlMsg::Hello { auth_token: token, tunnels } => {
+                        if token != auth_token {
+                            warn!("bad auth token");
+                            return Err(anyhow::anyhow!("auth failed"));
+                        }
+                        break tunnels;
+                    }
+                    other => return Err(anyhow::anyhow!("expected Hello, got {other:?}")),
+                }
             }
-            tunnels
-        }
-        other => {
-            return Err(anyhow::anyhow!("expected Hello, got {other:?}"));
+            Some(Ok(Message::Text(text))) => {
+                match serde_json::from_str::<ControlMsg>(&text)? {
+                    ControlMsg::Hello { auth_token: token, tunnels } => {
+                        if token != auth_token {
+                            warn!("bad auth token");
+                            return Err(anyhow::anyhow!("auth failed"));
+                        }
+                        break tunnels;
+                    }
+                    other => return Err(anyhow::anyhow!("expected Hello, got {other:?}")),
+                }
+            }
+            Some(Ok(Message::Close(_))) | None => {
+                return Err(anyhow::anyhow!("connection closed before Hello"));
+            }
+            Some(Err(e)) => return Err(e.into()),
+            Some(Ok(_)) => continue, // skip Ping/Pong
         }
     };
 
     let assigned_ports: Vec<u16> = tunnels.iter().map(|t| t.remote_port).collect();
-    write_msg(&mut stream, &ControlMsg::HelloOk { assigned_ports }).await?;
+    ws_sink
+        .send(Message::Binary(encode_msg(&ControlMsg::HelloOk {
+            assigned_ports,
+        })?))
+        .await?;
 
-    info!(
-        "client authenticated, {} tunnel(s)",
-        tunnels.len()
-    );
+    info!("client authenticated, {} tunnel(s)", tunnels.len());
 
     // ── spin up public listeners ────────────────────────────────────────────
-    let (state, session_fut) = make_session(stream, tunnels.clone());
+    let (state, session_fut) = make_session(ws_sink, ws_stream, tunnels.clone());
 
     for (idx, tunnel) in tunnels.iter().enumerate() {
-        let state_clone = std::sync::Arc::clone(&state);
+        let state_clone = Arc::clone(&state);
         let remote_port = tunnel.remote_port;
         let tunnel_id = idx as u8;
         tokio::spawn(async move {

@@ -1,9 +1,6 @@
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
-/// Maximum allowed frame payload (16 MiB).
-pub const MAX_FRAME_SIZE: u32 = 16 * 1024 * 1024;
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ControlMsg {

@@ -1,7 +1,7 @@
 [package]
 name    = "rustunnel-client"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [[bin]]
 name = "rustunnel-client"
@@ -19,4 +19,6 @@ toml       = { workspace = true }
 tracing    = { workspace = true }
 tracing-subscriber = { workspace = true }
 thiserror  = { workspace = true }
-anyhow     = { workspace = true }
+anyhow            = { workspace = true }
+tokio-tungstenite = { workspace = true }
+futures-util      = { workspace = true }
